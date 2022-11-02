@@ -25,3 +25,13 @@ The original code was also made by silent [geshin_set_color.py](https://github.c
 From the description of the script, this tool is used to forcibly sets the color of a texcoord output to a certain value in `RGBA`.
 
 The `RGB` controls the color value and the `A` controls the outline thickness.
+
+--------------------
+
+## Usage
+
+The usage of both `GLine` and `GColor` is the same. Put them on the mod folder that you want to edit and run it.
+
+## Problems
+
+I haven't yet to test this on merged mods but I'm pretty sure that it'll not work. I'm still working on a solution for it.
