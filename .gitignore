@@ -1,0 +1,13 @@
+.idea
+venv
+GLine Setter/Executable
+GLine Setter/Test
+GLine Setter/build
+GLine Setter/dist
+GLine Setter/__pycache__
+Hash Fixer/Executable and archive
+Hash Fixer/Test
+Hash Fixer/build
+Hash Fixer/dist
+Hash Fixer/__pycache__
+Hash Fixer/Resources
