@@ -27,3 +27,9 @@ If some warnings still persist after running the tool, that means the hash that 
 You can add these hashes yourself by looking at the warning messages.
 
 After you got all the hashes that persist, add them to `common_hash.txt` and run the tool again.
+
+## Problems
+
+For now the tool will skip mods that have multiple textures or in other words, merged mods.
+
+If you have more than one merged mods like these then it is possible that you will still get the hash warnings.
