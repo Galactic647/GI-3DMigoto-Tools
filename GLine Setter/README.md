@@ -30,8 +30,18 @@ The `RGB` controls the color value and the `A` controls the outline thickness.
 
 ## Usage
 
+### **Single mods**
+
 The usage of both `GLine` and `GColor` is the same. Put them on the mod folder that you want to edit and run it.
 ![image](https://user-images.githubusercontent.com/44773161/199425538-f2eb1df6-22f0-409c-9c0e-2b6410261d5d.png)
+
+### **Merged mods**
+
+Same as the first one, the usage of both `GLine` and `GColor` is the same. But this time put the tool in the parent folder instead (where `merged.ini` is).
+
+![image](https://user-images.githubusercontent.com/44773161/201698385-bf9d150f-d932-47ed-bebc-ab31d38f1d0c.png)
+
+After that run it like usual.  
 
 ## Problems
 
