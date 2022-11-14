@@ -41,8 +41,4 @@ Same as the first one, the usage of both `GLine` and `GColor` is the same. But t
 
 ![image](https://user-images.githubusercontent.com/44773161/201698385-bf9d150f-d932-47ed-bebc-ab31d38f1d0c.png)
 
-After that run it like usual.  
-
-## Problems
-
-I haven't yet to test this on merged mods but I'm pretty sure that it'll not work. I'm still working on a solution for it.
+After that run it like usual.
