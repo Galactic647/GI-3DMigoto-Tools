@@ -3,8 +3,10 @@ import colorama
 
 from typing import Optional, Union
 import configparser
+import requests
 import logging
 import glob
+import json
 import os
 
 colorama.init()
@@ -41,6 +43,7 @@ stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(CustomFormatter())
 
 logger.addHandler(stream_handler)
+COMMON_HASH_SRC = r'https://raw.githubusercontent.com/Galactic647/GI-3DMigoto-Tools/master/Hash%20Fixer/common_hash.txt'
 
 
 class CHashFix(object):
@@ -49,6 +52,7 @@ class CHashFix(object):
 
     def __init__(self, mode: Optional[str] = 'fix') -> None:
         self.mod_folder = None
+        self.hash_auto_update = False
         self.common_hash = None
         self.mode = mode.lower()
 
@@ -63,23 +67,68 @@ class CHashFix(object):
         logger.info('Hashes loaded')
         return common_hash
 
-    def get_ini_files(self) -> Union[list, None]:
+    def load_config(self) -> Union[list, None]:
         if not os.path.exists('config.ini'):
             logger.error('config.ini not found')
+            logger.info('Creating config.ini')
+
+            self.config.add_section('Path')
+            self.config.set('Path', 'mod_folder', None)
+
+            self.config.add_section('Hash Auto Update')
+            self.config.set('Hash Auto Update', 'enabled', json.dumps(False))
+
+            with open('config.ini', 'w') as file:
+                self.config.write(file)
+                file.close()
+            logger.info('config.ini created, please set the path and relaunch the tool')
             return
 
         self.config.read('config.ini')
         self.mod_folder = self.config.get('Path', 'mod_folder')
+
+        try:
+            self.hash_auto_update = json.loads(self.config.get('Hash Auto Update', 'enabled'))
+        except configparser.NoSectionError:
+            self.config.set('Hash Auto Update', 'enabled', json.dumps(False))
+            with open('config.ini', 'w') as file:
+                self.config.write(file)
+                file.close()
+                
+            self.hash_auto_update = False
         logger.info('Config loaded')
 
+    def get_ini_files(self):
+        self.load_config()
         if not os.path.exists(self.mod_folder):
             logger.error(f'Mod folder not found -> {self.mod_folder}')
             return
+
+        if self.hash_auto_update:
+            self.update_hash()
 
         logger.info('Scanning...')
         ini_files = glob.glob(f'{self.mod_folder}/**/*.ini', recursive=True)
         logger.info(f'Detected {len(ini_files)} ini file(s)')
         return ini_files
+
+    def update_hash(self) -> None:
+        logger.info('Checking source...')
+        response = requests.get(COMMON_HASH_SRC)
+        if response.status_code != 200:
+            logger.error(f'Unable to auto update hash with response code {response.status_code}')
+            return
+        else:
+            check_hash = {hash_ for hash_ in response.text.split('\n') if hash_}
+            with open('common_hash.txt', 'r') as file:
+                current_hash = {line.strip() for line in file.readlines() if line.strip()}
+                file.close()
+            
+            current_hash.update(check_hash.difference(current_hash))
+
+            with open('common_hash.txt', 'w') as file:
+                file.write('\n'.join(current_hash))
+        logger.info('common_hash.txt updated')
 
     def remove_duplicate(self, ini: str) -> None:
         # There might be a better way to do this but I choose this because of safer option
@@ -119,8 +168,35 @@ class CHashFix(object):
 
     def process(self, ini: str) -> None:
         self.mod_config.clear()
-        self.mod_config.read(ini)
         ini_name = ini.split('\\')[-1]
+
+        try:
+            self.mod_config.read(ini)
+        except configparser.DuplicateSectionError as e:
+            logger.error(e)
+            self.remove_duplicate(ini)
+        except configparser.DuplicateOptionError as e:
+            logger.error(e)
+            self.remove_duplicate(ini)
+        except Exception as e:
+            logger.error(f'Unexpected error {e}')
+            logger.info(f'Skipping {ini}')
+            return
+
+        try:
+            self.mod_config.read(ini)
+        except configparser.DuplicateSectionError as e:
+            logger.error('Unable to solve error')
+            logger.info(f'Skipping {ini}')
+            return
+        except configparser.DuplicateOptionError as e:
+            logger.error('Unable to solve error')
+            logger.info(f'Skipping {ini}')
+            return
+        except Exception as e:
+            logger.error(f'Unexpected error {e}')
+            logger.info(f'Skipping {ini}')
+            return
 
         for section in self.mod_config.sections():
             if not self.mod_config.has_option(section, 'hash'):
@@ -156,21 +232,11 @@ class CHashFix(object):
         for ini in ini_files:
             logger.info('Checking {0}'.format(ini.split('\\')[-1]))
 
-            if 'DISABLED' in ini or 'merged' in ini:
+            if 'DISABLED' in ini or 'merged.ini' in ini:
                 logger.info(f'Skipping {ini}')
+                continue
 
-            try:
-                self.process(ini=ini)
-            except configparser.DuplicateSectionError as e:
-                logger.info(e)
-                self.remove_duplicate(ini=ini)
-                self.process(ini=ini)
-            except configparser.DuplicateOptionError as e:
-                logger.info(e)
-                self.remove_duplicate(ini=ini)
-                self.process(ini=ini)
-            except Exception as e:
-                logger.error(e)
+            self.process(ini=ini)
         logger.info('Done!')
 
 
