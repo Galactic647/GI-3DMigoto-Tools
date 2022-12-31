@@ -1,5 +1,6 @@
 .idea
 venv
+.vscode
 GLine Setter/Executable and archive
 GLine Setter/Test
 GLine Setter/build
