@@ -1,6 +1,6 @@
 # GI-3Dmigoto-Tools
 
-![downloads](https://img.shields.io/github/downloads/Galactic647/GI-3DMigoto-Tools/total?color=brightgreen&label=Downloads)
+![GitHub all releases](https://img.shields.io/github/downloads/Galactic647/GI-3DMigoto-Tools/total?color=brightgreen&label=Downloads&logo=GitHub)
 ![release](https://img.shields.io/github/v/release/Galactic647/GI-3DMigoto-Tools?label=Release)
 
 -------------------
@@ -22,4 +22,4 @@ I will make new tools if I think it's useful or if you do need a tool then you c
 * Hash fixer
 * Gline Setter
   * GLine
-  * GColor 
+  * GColor
