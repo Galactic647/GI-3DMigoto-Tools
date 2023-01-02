@@ -11,5 +11,7 @@ Hash Fixer/Executable and archive
 Hash Fixer/Test
 Hash Fixer/build
 Hash Fixer/dist
+Hash Fixer/core/__pycache__
 Hash Fixer/__pycache__
 Hash Fixer/Resources
+*.spec
