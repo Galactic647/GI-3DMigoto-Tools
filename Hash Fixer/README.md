@@ -26,6 +26,9 @@ Type the mode that you want
 The way this tool fix the warnings was by adding `match_priority = 0` for sections in the ini file that have a common hash.  
 ![image](https://user-images.githubusercontent.com/44773161/209852627-cb0fb585-e41c-49f3-8c48-126aa0276063.png)
 
+For `ShaderOverride` sections it's slightly different because the option added was `allow_duplicate_hash = true` instead of match_priority.  
+![image](https://user-images.githubusercontent.com/44773161/210266603-3c051109-2c97-4ce3-aa7f-c60d47a6118d.png)
+
 ---
 
 ## Troubleshooting
