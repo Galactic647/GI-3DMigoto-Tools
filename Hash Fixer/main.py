@@ -124,15 +124,28 @@ class CHashFix(object):
                 continue
 
             hash_ = self.mod_config.get(section, 'hash')
+            if not hash_ in self.common_hash:
+                continue
+
             has_match_priority = self.mod_config.has_option(section, 'match_priority')
+            has_allow_duplicate = self.mod_config.has_option(section, 'allow_duplicate_hash')
 
-            if hash_ in self.common_hash and not has_match_priority and self.mode == 'fix':
-                self.mod_config.set(section, 'match_priority', '0')
-                logger.info(f"Config {ini_name}: adding option 'match_priority' to section -> {section}")
+            if 'shaderoverride' in section.lower():
+                if not has_allow_duplicate and self.mode == 'fix':
+                    self.mod_config.set(section, 'allow_duplicate_hash', 'true')
+                    logger.info(f"Config {ini_name}: adding option 'allow_duplicate_hash' to section -> {section}")
 
-            elif hash_ in self.common_hash and has_match_priority and self.mode == 'restore':
-                self.mod_config.remove_option(section, 'match_priority')
-                logger.info(f"Config {ini_name}: deleting 'match_priority' from section -> {section}")
+                elif has_allow_duplicate and self.mode == 'restore':
+                    self.mod_config.remove_option(section, 'allow_duplicate_hash')
+                    logger.info(f"Config {ini_name}: deleting 'allow_duplicate_hash' from section -> {section}")
+            else:
+                if not has_match_priority and self.mode == 'fix':
+                    self.mod_config.set(section, 'match_priority', '0')
+                    logger.info(f"Config {ini_name}: adding option 'match_priority' to section -> {section}")
+
+                elif has_match_priority and self.mode == 'restore':
+                    self.mod_config.remove_option(section, 'match_priority')
+                    logger.info(f"Config {ini_name}: deleting 'match_priority' from section -> {section}")
 
         with open(ini, 'w') as file:
             self.mod_config.write(file)
