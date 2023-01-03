@@ -1,17 +1,11 @@
-.idea
+__pycache__
 venv
+.idea
 .vscode
-GLine Setter/Executable and archive
-GLine Setter/Test
-GLine Setter/build
-GLine Setter/dist
-GLine Setter/__pycache__
-GLine Setter/Resources
-Hash Fixer/Executable and archive
-Hash Fixer/Test
-Hash Fixer/build
-Hash Fixer/dist
-Hash Fixer/core/__pycache__
-Hash Fixer/__pycache__
-Hash Fixer/Resources
+build
+dist
+Resources
+Executable and archive
+test
+
 *.spec
