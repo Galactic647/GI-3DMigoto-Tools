@@ -42,6 +42,10 @@ class BaseCommand(object):
         pass
 
     @commands.command()
+    def help(self, cmd: Optional[str] = None) -> None:
+        pass
+
+    @commands.command()
     def stop(self) -> None:
         self.loader.stop()
 
