@@ -1,8 +1,10 @@
+from typing import Callable, Iterator, Optional, Union
 from collections.abc import MutableMapping
-from typing import Callable, Iterator
 import itertools
 import importlib
 import inspect
+import types
+import regex
 import sys
 import os
 
@@ -22,24 +24,79 @@ class Command(object):
             raise ValueError('Invalid name')
 
         self.callback = cmd
+        self.brief = kwargs.get('brief', None)
+        self.description = kwargs.get('brief', None)
+        self.usage = kwargs.get('usage', None)
         self.module = cmd.__module__
-        self.enabled = kwargs.get('enabled', True)
         self.aliases = kwargs.get('aliases', [])
         if not isinstance(self.aliases, (list, tuple, set)):
             raise ValueError('Invalid alias type')
+        for alias in self.aliases:
+            if regex.search(r'\s', alias):
+                raise ValueError(f'Alias cannot have whitespaces')
 
         self.hidden = kwargs.get('hidden', False)
+        self._signature = inspect.signature(cmd)
+        self._parameters = self._signature.parameters.copy()
 
         # parent is added when adding command to loader
         self.parent = None
+
+    @property
+    def signature(self) -> str:
+        if self.usage is not None:
+            return self.usage
+        result = list()
+
+        for name, param in self._parameters.items():
+            if name == 'self':
+                continue
+            if param.default is not param.empty:
+                if param.default is None:
+                    result.append(f'[{name}]')
+                else:
+                    result.append(f'[{name}={param.default}]')
+            elif self._is_optional(param.annotation):
+                result.append(f'[{name}]')
+            else:
+                result.append(f'<{name}>')
+        return ' '.join(result)
+    
+    @staticmethod
+    def _is_optional(annotation: type) -> bool:
+        try:
+            origin = annotation.__origin__
+        except AttributeError:
+            return False
+        
+        if origin is not Union:
+            return False
+        return origin.__args__[-1] is type(None)
 
     def __call__(self, *args, **kwargs):
         self.callback(self.parent, *args, **kwargs)
 
 
+class Slot(object):
+    def __init__(self, name: str, mods: dict, hidden: Optional[bool] = False) -> None:
+        self.name = name
+        self.mods = mods
+        self.hidden = hidden
+
+        if not self.name:
+            raise ValueError('Name cannot be empty')
+        elif not isinstance(self.name, str):
+            raise ValueError(self.name)
+        elif not isinstance(self.mods, dict):
+            raise ValueError(self.mods)
+        elif not isinstance(self.hidden, bool):
+            raise ValueError(hidden)
+
+
 class Loader(MutableMapping):
     def __init__(self) -> None:
         self._slots = dict()
+        self._alises = dict()
         self._commands = dict()
         self._stop = False
 
@@ -51,6 +108,20 @@ class Loader(MutableMapping):
     def commands(self) -> list:
         return list(self._commands)
 
+    def add_slot(self, **kwargs) -> None:
+        if kwargs.get('slot') is not None:
+            slot = kwargs['slot']
+            self[slot.name] = slot
+            return
+
+        name = kwargs.get('name', None)
+        self[name] = Slot(**kwargs)
+
+    def remove_slot(self, name: str) -> None:
+        if not name in self:
+            raise KeyError(name)
+        del self[name]
+
     def add_command(self, cmd: Callable) -> None:
         """Loading command class
         
@@ -61,6 +132,10 @@ class Loader(MutableMapping):
             if not isinstance(command, Command):
                 continue
             command.parent = cmd
+            if command.aliases:
+                for alias in command.aliases:
+                    # No setter for alias
+                    self._alises[alias] = method
             self.update({method: command})
 
     def remove_command(self, cmd: str) -> None:
@@ -99,7 +174,7 @@ class Loader(MutableMapping):
         else:
             command = consolein
 
-        if not command in self.commands:
+        if not command in self.commands and not command in self._alises:
             self._message(f'Command {command!r} does not exists')
             return
         
@@ -118,7 +193,10 @@ class Loader(MutableMapping):
         self._stop = True
 
     def __getitem__(self, key) -> None:
-        if key in self._commands:
+        if key in self._alises:
+            method = self._alises[key]
+            return self._commands[method]
+        elif key in self._commands:
             return self._commands[key]
         elif key in self._slots:
             return self._slots[key]
@@ -126,7 +204,7 @@ class Loader(MutableMapping):
             raise KeyError(key)
 
     def __setitem__(self, key, value):
-        if isinstance(value, str):
+        if isinstance(value, Slot):
             if key in self._slots and value == self._slots[key]:
                 return
             self._slots[key] = value
@@ -136,7 +214,14 @@ class Loader(MutableMapping):
             self._commands[key] = value
 
     def __delitem__(self, key) -> None:
-        if key in self._commands:
+        if key in self._alises:
+            method = self._alises[key]
+            reference_aliases = [alias for alias, value in self._alises.items() if value == method]
+
+            del self._commands[method]
+            for alias in reference_aliases:
+                del self._alises[alias]
+        elif key in self._commands:
             del self._commands[key]
         elif key in self._slots:
             del self._slots[key]
