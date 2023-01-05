@@ -1,10 +1,11 @@
 from typing import Callable, Iterator, Optional, Union
 from collections.abc import MutableMapping
+import configparser
 import itertools
 import importlib
 import inspect
-import types
 import regex
+import json
 import sys
 import os
 
@@ -29,6 +30,7 @@ class Command(object):
         self.usage = kwargs.get('usage', None)
         self.module = cmd.__module__
         self.aliases = kwargs.get('aliases', [])
+
         if not isinstance(self.aliases, (list, tuple, set)):
             raise ValueError('Invalid alias type')
         for alias in self.aliases:
@@ -98,7 +100,11 @@ class Loader(MutableMapping):
         self._slots = dict()
         self._alises = dict()
         self._commands = dict()
+        self._command_module = dict()
         self._stop = False
+        self._auto_clear = True
+
+        self.load_config()
 
     @property
     def slots(self) -> list:
@@ -107,6 +113,14 @@ class Loader(MutableMapping):
     @property
     def commands(self) -> list:
         return list(self._commands)
+
+    def load_config(self):
+        if not os.path.exists('config.ini'):
+            raise FileNotFoundError('config.ini does not exists')
+
+        parser = configparser.ConfigParser()
+        parser.read('config.ini')
+        self._auto_clear = json.loads(parser.get('General', 'auto_clear'))
 
     def add_slot(self, **kwargs) -> None:
         if kwargs.get('slot') is not None:
@@ -127,6 +141,7 @@ class Loader(MutableMapping):
         
         Only for command module
         """
+
         for method in dir(cmd):
             command = getattr(cmd, method)
             if not isinstance(command, Command):
@@ -149,9 +164,26 @@ class Loader(MutableMapping):
         sys.modules.pop(cmd, None)
         importlib.invalidate_caches()
 
-    def load_command(self, cmd: str) -> None:
-        cmd = importlib.import_module(cmd, '..')
-        cmd.setup(self)
+    def load_command(self, module: str) -> None:
+        module = importlib.import_module(module, '..')
+        if module in self._command_module:
+            return
+        self._command_module.update({module.__name__: module})
+        module.setup(self)
+
+    def unload_command(self, module: str) -> None:
+        if module not in self._command_module:
+            raise KeyError(f'Command module {module} does not exists')
+        module = self._command_module[module]
+        if module.endswith('.base_command'):
+            raise KeyError('Unable to unload base command')
+        module.teardown(self)
+
+    def reload_command(self, module: str) -> None:
+        if module not in self._command_module:
+            raise KeyError(f'Command module {module} does not exists')
+        self.unload_command(module)
+        self.load_command(module)
 
     @staticmethod
     def _message(msg: str) -> None:
