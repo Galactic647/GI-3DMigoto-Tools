@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Callable, Iterator, Optional, Union
 from collections.abc import MutableMapping
 import configparser
@@ -9,6 +11,14 @@ import json
 import sys
 import os
 
+SLOT = 0
+NORMAL = 1
+UNIVERSAL = 2
+
+
+class OutOfScopeError(Exception):
+    pass
+
 
 def command(**attrs):
     def wrapper(func):
@@ -19,16 +29,30 @@ def command(**attrs):
 
 
 class Command(object):
+    VALID_ATTRS = (
+        'name', 'aliases', 'scope',
+        'brief', 'description', 'usage'
+        'hidden'
+    )
+
+    def __new__(cls, *__, **kwargs) -> Command:
+        self = super().__new__(cls)
+        
+        for attr in kwargs:
+            if attr in self.VALID_ATTRS:
+                continue
+            kwargs.pop(attr)
+        self.__original_kwargs__ = kwargs.copy()
+        return self
+
     def __init__(self, cmd: Callable, **kwargs) -> None:
         self.name = kwargs.get('name', cmd.__name__)
+
         if not isinstance(self.name, str):
             raise ValueError('Invalid name')
+        elif regex.search(r'\s', self.name):
+            raise ValueError('Name cannot have whitespaces')
 
-        self.callback = cmd
-        self.brief = kwargs.get('brief', None)
-        self.description = kwargs.get('brief', None)
-        self.usage = kwargs.get('usage', None)
-        self.module = cmd.__module__
         self.aliases = kwargs.get('aliases', [])
 
         if not isinstance(self.aliases, (list, tuple, set)):
@@ -37,6 +61,17 @@ class Command(object):
             if regex.search(r'\s', alias):
                 raise ValueError(f'Alias cannot have whitespaces')
 
+        self.callback = cmd
+        self.module = cmd.__module__
+        self.scope = kwargs.get('scope', NORMAL)
+
+        if self.scope not in range(3):
+            raise ValueError('Invalid scope range')
+
+        self.brief = kwargs.get('brief', None)
+        self.description = kwargs.get('description', self.brief)
+
+        self._usage = kwargs.get('usage', None)
         self.hidden = kwargs.get('hidden', False)
         self._signature = inspect.signature(cmd)
         self._parameters = self._signature.parameters.copy()
@@ -45,13 +80,19 @@ class Command(object):
         self.parent = None
 
     @property
+    def usage(self) -> str:
+        if self._usage is None:
+            return f'{self.name} {self.signature}'
+        return self._usage
+
+    @property
     def signature(self) -> str:
-        if self.usage is not None:
-            return self.usage
+        if self._usage is not None:
+            return self._usage
         result = list()
 
         for name, param in self._parameters.items():
-            if name == 'self':
+            if name in ('self', 'con'):
                 continue
             if param.default is not param.empty:
                 if param.default is None:
@@ -75,8 +116,55 @@ class Command(object):
             return False
         return origin.__args__[-1] is type(None)
 
-    def __call__(self, *args, **kwargs):
-        self.callback(self.parent, *args, **kwargs)
+    def __call__(self, con: Console, *args, **kwargs):
+        # TODO add 'con' context to call
+        if self.scope not in (con.scope, UNIVERSAL):
+            raise OutOfScopeError(self.name, con.scope)
+        self.callback(self.parent, con, *args, **kwargs)
+
+
+class Console(object):
+    def __init__(self, loader: Loader) -> None:
+        self.scope = NORMAL
+        self.curslot = None
+        self.cmd_called = None
+        self.loader = loader
+
+    @staticmethod
+    def _digest_arguments(args) -> list:
+        return [arg.strip() for arg in args.split('"') if arg.strip()]
+
+    def get_input(self):
+        command = None
+        args = None
+        curslot = self.curslot
+
+        if curslot is None:
+            curslot = ''
+        else:
+            curslot += ' '
+        user_input = input(f'{curslot}> ').strip()
+
+        if not len(user_input.split(' ')) == 1:
+            command, args = user_input.split(' ', maxsplit=1)
+            args = self._digest_arguments(args)
+        else:
+            command = user_input
+        return command, args
+
+    def enter_slot(self, slot: str) -> None:
+        if slot not in self.loader:
+            raise KeyError(slot)
+        self.curslot = slot
+        self.scope = SLOT
+
+    def exit_slot(self) -> None:
+        self.curslot = None
+        self.scope = NORMAL
+
+    def message(self, msg) -> None:
+        print(msg)
+        input()
 
 
 class Slot(object):
@@ -103,6 +191,10 @@ class Loader(MutableMapping):
         self._command_module = dict()
         self._stop = False
         self._auto_clear = True
+
+        self._console = Console(self)
+        self._current_scope = NORMAL
+        self._slot_scope = None
 
         self.load_config()
 
@@ -165,7 +257,7 @@ class Loader(MutableMapping):
         importlib.invalidate_caches()
 
     def load_command(self, module: str) -> None:
-        module = importlib.import_module(module, '..')
+        module = importlib.import_module(module)
         if module in self._command_module:
             return
         self._command_module.update({module.__name__: module})
@@ -191,29 +283,22 @@ class Loader(MutableMapping):
         input()
         os.system('cls')
 
-    @staticmethod
-    def _digest_arguments(args) -> list:
-        return [arg.strip() for arg in args.split('"') if arg.strip()]
-
     def _start(self) -> None:
-        command = None
-        args = None
-        consolein = input('> ').strip()
-
-        if not len(consolein.split(' ')) == 1:
-            command, args = consolein.split(' ', maxsplit=1)
-            args = self._digest_arguments(args)
-        else:
-            command = consolein
+        command, args = self._console.get_input()
 
         if not command in self.commands and not command in self._alises:
             self._message(f'Command {command!r} does not exists')
             return
+
+        cmd = self[command]
+        if cmd.scope not in (self._console.scope, UNIVERSAL):
+            self._message(f'Command {command!r} does not exists')
+            return
         
         if args is not None:
-            self[command](*args)
+            cmd(self._console, *args)
         else:
-            self[command]()
+            cmd(self._console)
         os.system('cls')
 
     def start(self) -> None:
