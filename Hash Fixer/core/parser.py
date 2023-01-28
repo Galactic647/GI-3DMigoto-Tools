@@ -1,8 +1,20 @@
-from typing import Optional, TextIO, Iterator, Union, Any
+from typing import Optional, TextIO, Iterator, Union
 from collections.abc import MutableMapping
 import random
 import string
 import regex
+
+
+def comment_validation(text: str, type_: Optional[str] = None) -> bool:
+    comment_format = '{type_}comment-[a-fA-F0-9]{{16,}}'
+
+    if type_ is None:
+        type_ = ''
+    elif not type_.endswith('-'):
+        type_ = f'{type_}-'
+    if regex.search(comment_format.format(type_=type_), text):
+        return True
+    return False
 
 
 class NoSectionError(Exception):
@@ -18,7 +30,7 @@ class NoSectionError(Exception):
 
 
 class NoOptionError(Exception):
-    """Raised when trying get non-existent option"""
+    """Raised when trying to get non-existent option"""
 
     def __init__(self, option: str) -> None:
         self.message = f'Option {option!r} does not exists'
@@ -57,6 +69,8 @@ class ParseError(Exception):
 
 
 def get_random_id(k: Optional[int] = 16) -> str:
+    if k < 16:
+        raise ValueError('ID have to have at least 16 digits in length')
     return ''.join(random.choices(string.hexdigits, k=k))
 
 
@@ -66,6 +80,7 @@ class Option(object):
     def __init__(self, **kwargs) -> None:
         self._name = None
         self._value = None
+        self._is_commented = False
 
         self.name = kwargs.get('option')
         if self.name is None:
@@ -98,10 +113,20 @@ class Option(object):
         self.name = name
         self.value = value
 
+    def comment(self) -> None:
+        self._is_commented = True
+
+    def uncomment(self) -> None:
+        self._is_commented = False
+
     def __repr__(self) -> str:
+        prefix = ''
+        if self._is_commented:
+            prefix = '; '
+
         if self.value is not None and self.name is None or self.name.startswith('item-'):
-            return self.value
-        return f'{self.name} = {self.value}'
+            return f'{prefix}{self.value}'
+        return f'{prefix}{self.name} = {self.value}'
 
     __str__ = __repr__
 
@@ -122,7 +147,7 @@ class Section(MutableMapping):
     def options(self) -> list:
         return list(self._options)
 
-    def get(self, option: str, only_value: Optional[bool] = True):
+    def get(self, option: str, *, only_value: Optional[bool] = True):
         if option not in self:
             raise NoOptionError(option)
         if only_value:
@@ -139,7 +164,12 @@ class Section(MutableMapping):
         if option is None:
             option = f'item-{get_random_id()}'
         option = Option(name=option, value=value)
-        self.update({option.name: option.value})
+        self.update({option.name: option})
+
+    def add_comment(self, comment: str) -> None:
+        if comment.strip()[0] not in ModConfigParser.COMMENT_PREFIX:
+            comment = f'; {comment}'
+        self.update({f'section-comment-{get_random_id()}': comment})
 
     def has_option(self, option: str) -> bool:
         return option in self
@@ -160,7 +190,9 @@ class Section(MutableMapping):
         elif not isinstance(value, (Option, str)):
             return NotImplemented
 
-        if isinstance(value, str):
+        if comment_validation(key, 'section'):
+            self._options[key] = value
+        elif isinstance(value, str):
             self._options[key] = Option(name=key, value=value)
             return
         self._options[key] = value
@@ -179,7 +211,13 @@ class Section(MutableMapping):
     def __repr__(self) -> str:
         if self.skip_parse or not self._options:
             return f'[{self.name}]'
-        options = '\n'.join(map(str, self._options.values()))
+        options = list()
+        for key, value in self._options.items():
+            if comment_validation(key, 'section'):
+                options.append(value)
+            else:
+                options.append(str(value))
+        options = '\n'.join(options)
         return f'[{self.name}]\n{options}'
 
     __str__ = __repr__
@@ -189,7 +227,7 @@ class ModConfigParser(MutableMapping):
     """Custom parser for GIMI mods config files
     
     This parser also works for normal parser but not as rigid as configparser module.
-    The parser is able to parse and perserve comments and commands, commands is save in raw form
+    The parser is able to parse and perserve comments and commands, commands is saved in raw form
     since it was unparseable (intended).
     """
 
@@ -224,20 +262,29 @@ class ModConfigParser(MutableMapping):
             raise NoSectionError(section)
         self[section].add_option(option, value)
 
-    def get(self, section: str, option: Optional[str] = None) -> Union[Section, None, str]:
+    def get(self, section: str, option: Optional[str] = None, *,
+            only_value: Optional[bool] = True) -> Union[Section, None, str]:
         if section not in self:
             raise NoSectionError(section)
         elif option is not None and option not in self[section]:
             raise NoOptionError(option)
 
         if option is None:
+            if only_value:
+                return str(self[section])
             return self[section]
-        return self[section].get(option)
+        return self[section].get(option, only_value=only_value)
 
-    def add_comment(self, comment: str) -> None:
+    def add_comment(self, comment: str, section: Optional[str] = None) -> None:
         if comment.strip()[0] not in self.COMMENT_PREFIX:
             comment = f'; {comment}'
-        self.update({f'comment-{get_random_id()}': comment})
+
+        if section is None:
+            self.update({f'comment-{get_random_id()}': comment})
+        elif section not in self:
+            raise NoSectionError(section)
+        else:
+            self[section].add_comment(comment)
 
     def add_section(self, section: Union[Section, str]) -> None:
         if isinstance(section, Section):
@@ -274,20 +321,18 @@ class ModConfigParser(MutableMapping):
         config_data = [line.replace('\n', '') for line in fp.readlines()]
         cursect = None  # None or Section
         lastsect = None  # None or Section
-        comment_line = False  # True if current line is comment
 
         for line in config_data:
-            for prefix in self.COMMENT_PREFIX:
-                if not line.strip().startswith(prefix):
-                    continue
-                self.add_comment(line.strip())
-                comment_line = True
-                break
-            if not line or comment_line:
-                comment_line = False
+            if not line:
+                continue
+            if line.strip()[0] in self.COMMENT_PREFIX:
+                if cursect is None:
+                    self.add_comment(line.strip())
+                else:
+                    self.add_comment(line.strip(), cursect.name)
                 continue
 
-            section_match = self.RESECTION.match(line)
+            section_match = self.RESECTION.match(line.strip())
             option_match = self.REOPTION.match(line)
 
             if section_match and option_match:
@@ -326,7 +371,7 @@ class ModConfigParser(MutableMapping):
 
     def write(self, fp: TextIO) -> None:
         for section in self:
-            if section.startswith('comment-'):
+            if comment_validation(section, None):
                 continue
             self[section].skip_parse = False
         fp.write('\n\n'.join(map(str, self.values())))
@@ -342,7 +387,7 @@ class ModConfigParser(MutableMapping):
     def __setitem__(self, key: str, value: Union[Section, str]) -> None:
         if not isinstance(value, (Section, str)):
             return NotImplemented
-        elif isinstance(value, str) and not key.startswith('comment-'):
+        elif isinstance(value, str) and not comment_validation(key, None):
             return
         self._sections[key] = value
 
