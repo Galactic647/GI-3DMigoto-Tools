@@ -33,9 +33,13 @@ For `ShaderOverride` sections it's slightly different because the option added w
 
 ## Troubleshooting
 
-If some warnings still persist after running the tool, that means the hash that the mod use is not in `common_hash.txt`.
+If some warnings still persist after running the tool, that means the section of the mod config file is not on the list of sections that the tool scan.
 
-You can add these hashes yourself by looking at the warning messages.
+Here's an example of 2 sections that doesn't get scanned
+![image](https://user-images.githubusercontent.com/44773161/227728531-593ea4c4-76b9-4dc6-9b9d-73d9e7d7411d.png)
+
+To solve this issue you can add the hash manually by looking at the warning message and add it to `common_hash.txt`
+
+Here's an example of a warning that presist
 ![image](https://user-images.githubusercontent.com/44773161/199424717-57bc3d27-990a-47e4-922b-b9eacaeeeef9.png)
-
-After you got all the hashes that persist, add them to `common_hash.txt` and run the tool again.
+In this example you can add `4e3376db` to `common_hash.txt` and then run the tool again and everything should be fixed.
