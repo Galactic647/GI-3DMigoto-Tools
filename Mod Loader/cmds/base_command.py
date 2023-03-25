@@ -35,7 +35,9 @@ class BaseCommand(container.CMDContainer):
 
     @commands.command()
     def listslot(self, con) -> None:
-        pass
+        con.message(dir(self))
+        con.message(self.__cont_name__)
+        con.message(self.__cont_commands__)
 
     @commands.command()
     def activeslot(self, con) -> None:

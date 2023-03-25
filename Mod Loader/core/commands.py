@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from core.errors import *
+
 from typing import Callable, Iterator, Optional, Union
 from collections.abc import MutableMapping
 import configparser
@@ -14,10 +16,6 @@ import os
 SLOT = 0
 NORMAL = 1
 UNIVERSAL = 2
-
-
-class OutOfScopeError(Exception):
-    pass
 
 
 def command(**attrs):
@@ -154,7 +152,7 @@ class Console(object):
 
     def enter_slot(self, slot: str) -> None:
         if slot not in self.loader:
-            raise KeyError(slot)
+            raise SlotNotFoundError(slot)
         self.curslot = slot
         self.scope = SLOT
 
@@ -162,9 +160,13 @@ class Console(object):
         self.curslot = None
         self.scope = NORMAL
 
+    def invoke(self, command: str) -> None:
+        pass
+
     def message(self, msg) -> None:
         print(msg)
-        input()
+        if self.loader._auto_clear:
+            input()
 
 
 class Slot(object):
@@ -176,11 +178,11 @@ class Slot(object):
         if not self.name:
             raise ValueError('Name cannot be empty')
         elif not isinstance(self.name, str):
-            raise ValueError(self.name)
+            raise TypeError(self.name)
         elif not isinstance(self.mods, dict):
-            raise ValueError(self.mods)
+            raise TypeError(self.mods)
         elif not isinstance(self.hidden, bool):
-            raise ValueError(hidden)
+            raise TypeError(hidden)
 
 
 class Loader(MutableMapping):
@@ -199,7 +201,7 @@ class Loader(MutableMapping):
         self.load_config()
 
     @property
-    def slots(self) -> list:
+    def slots(self)  -> list:
         return list(self._slots)
 
     @property
@@ -225,7 +227,7 @@ class Loader(MutableMapping):
 
     def remove_slot(self, name: str) -> None:
         if not name in self:
-            raise KeyError(name)
+            raise SlotNotFoundError(name)
         del self[name]
 
     def add_command(self, cmd: Callable) -> None:
@@ -252,7 +254,7 @@ class Loader(MutableMapping):
         """
 
         if not cmd in self.commands:
-            raise KeyError(cmd)
+            raise CommandNotFoundError(cmd)
         sys.modules.pop(cmd, None)
         importlib.invalidate_caches()
 
@@ -265,15 +267,15 @@ class Loader(MutableMapping):
 
     def unload_command(self, module: str) -> None:
         if module not in self._command_module:
-            raise KeyError(f'Command module {module} does not exists')
+            raise ModuleNotFoundError(f'Command module {module} does not exists')
         module = self._command_module[module]
-        if module.endswith('.base_command'):
-            raise KeyError('Unable to unload base command')
+        if module.endswith('.base_command') or module.endswith('.base_slot_command'):
+            raise CommandError('Unable to unload base command')
         module.teardown(self)
 
     def reload_command(self, module: str) -> None:
         if module not in self._command_module:
-            raise KeyError(f'Command module {module} does not exists')
+            raise ModuleNotFoundError(f'Command module {module} does not exists')
         self.unload_command(module)
         self.load_command(module)
 
