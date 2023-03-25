@@ -5,6 +5,7 @@ import colorama
 
 from typing import Optional, Union
 import logging
+import regex
 import glob
 import os
 
@@ -43,8 +44,18 @@ stream_handler.setFormatter(CustomFormatter())
 
 logger.addHandler(stream_handler)
 
+RESECTION = regex.compile(r'''
+    ^
+    (Texture|Shader)
+    Override
+    .*?
+    (Cards|FaceHead|VertexLimitRaise|Card[A-C])
+    (Diffuse|LightMap|Shadow|ShadowRamp)?
+    $
+''', regex.VERBOSE | regex.IGNORECASE)
 
-class CHashFix(object):
+
+class HashFixer(object):
     config = parser.ModConfigParser()
     mod_config = parser.ModConfigParser()
 
@@ -58,15 +69,14 @@ class CHashFix(object):
         self.load_config()
 
     @staticmethod
-    def load_hash() -> Union[list, None]:
+    def load_hash() -> set:
         if not os.path.exists('common_hash.txt'):
-            logger.error('common_hash.txt not found')
-            return
+            open('common_hash.txt', 'w').close()
+            return set()
 
         with open('common_hash.txt', 'r') as file:
-            common_hash = [line.strip() for line in file.readlines()]
+            common_hash = set(line.strip() for line in file.readlines())
             file.close()
-        logger.info('Hashes loaded')
         return common_hash
 
     def create_config(self) -> None:
@@ -103,10 +113,29 @@ class CHashFix(object):
             logger.error(f'Mod folder not found -> {self.mod_folder}')
             return
 
-        logger.info('Scanning...')
         ini_files = glob.glob(f'{self.mod_folder}/**/*.ini', recursive=True)
-        logger.info(f'Detected {len(ini_files)} ini file(s)')
         return ini_files
+
+    def collect_hash(self) -> list:
+        files = self.get_ini_files()
+        hashes = []
+        old_hashes = self.load_hash()
+
+        for file in files:
+            self.mod_config.clear()
+            self.mod_config.read(file)
+
+            for section in self.mod_config.sections:
+                if RESECTION.match(section) is None:
+                    continue
+                hashes.append(self.mod_config.get(section, 'hash'))
+        hashes = set(hash_ for hash_ in hashes if hashes.count(hash_) > 1)
+        old_hashes.symmetric_difference_update(hashes)
+
+        with open('common_hash.txt', 'w') as file:
+            file.write('\n'.join(old_hashes))
+            file.close()
+        return old_hashes
 
     def process(self, ini: str) -> None:
         self.mod_config.clear()
@@ -119,8 +148,8 @@ class CHashFix(object):
             logger.info(f'Skipping {ini}')
             return
 
-        for section in self.mod_config:
-            if not self.mod_config.has_option(section, 'hash') or section.startswith('comment-'):
+        for section in self.mod_config.sections:
+            if not self.mod_config.has_option(section, 'hash') or parser.identifier_check(section, 'comment'):
                 continue
 
             hash_ = self.mod_config.get(section, 'hash')
@@ -156,8 +185,11 @@ class CHashFix(object):
             if self.mod_folder is None:
                 return
             logger.info('Starting...')
-            self.common_hash = self.load_hash()
+            logger.info('Collecting hashes...')
+            self.common_hash = self.collect_hash()
+            logger.info('Scanning...')
             ini_files = self.get_ini_files()
+            logger.info(f'Detected {len(ini_files)} ini file(s)')
 
             if ini_files is None:
                 return
@@ -182,7 +214,7 @@ def main() -> None:
     mode = input('Mode (fix, restore): ')
     
     try:
-        chash = CHashFix(mode=mode)
+        chash = HashFixer(mode=mode)
     except ValueError as e:
         logger.error(e)
         return
