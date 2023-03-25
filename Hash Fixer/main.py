@@ -130,7 +130,7 @@ class HashFixer(object):
                     continue
                 hashes.append(self.mod_config.get(section, 'hash'))
         hashes = set(hash_ for hash_ in hashes if hashes.count(hash_) > 1)
-        old_hashes.symmetric_difference_update(hashes)
+        old_hashes.update(hashes.difference(old_hashes))
 
         with open('common_hash.txt', 'w') as file:
             file.write('\n'.join(old_hashes))
