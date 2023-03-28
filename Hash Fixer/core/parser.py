@@ -1,4 +1,4 @@
-from typing import Optional, TextIO, Iterator, Union
+from typing import Optional, TextIO, Iterator, Union, Any
 from collections.abc import MutableMapping
 import contextlib
 import regex
@@ -148,7 +148,7 @@ class Option(object):
 
         if value is not None and identifier_check(self.name, 'item'):
             return f'{prefix}{value}{comment}'
-        return f'{prefix}{self.name} = {value}{comment}'
+        return f'{prefix}{self.option} = {value}{comment}'
 
     __str__ = __repr__
 
@@ -170,22 +170,19 @@ class Section(MutableMapping):
 
     @property
     def options(self) -> list:
-        return list(value for _, value in self.items() if not isinstance(value, Comment))
+        return list(self._options)
 
-    def get(self, option: str, *, only_value: Optional[bool] = True):
-        # TODO fix behaviour to allow getting option based on 'option' and not 'name'
-        # If there's multiple option with the same key, return all of them
-
+    def get(self, option: str, *, only_value: Optional[bool] = True) -> Union[Option, Any]:
         if option not in self:
             raise NoOptionError(option)
         if only_value:
             return self[option].value
         return self[option]
 
-    def add_option(self, option: Optional[str] = None, value: Optional[str] = None, comment: Optional[str] = None) -> None:
+    def add_option(self, name: Optional[str] = None, option: Optional[str] = None, value: Optional[str] = None, comment: Optional[str] = None) -> None:
         if option is None is value:
             return
-        option = Option(option=option, value=value, comment=comment)
+        option = Option(name=name, option=option, value=value, comment=comment)
         self.update({option.name: option})
 
     def add_comment(self, comment: str, lead_space: Optional[bool] = False, end_space: Optional[bool] = False) -> None:
@@ -236,7 +233,7 @@ class Section(MutableMapping):
     __str__ = __repr__
 
 
-class ModConfigParser(MutableMapping):  # TODO allow same option name with specific id added
+class ModConfigParser(MutableMapping):
     """Custom parser for GIMI mods config files
     
     This parser also works for normal parser but not as rigid as configparser module.
@@ -272,23 +269,21 @@ class ModConfigParser(MutableMapping):  # TODO allow same option name with speci
         $
     """, regex.VERBOSE | regex.IGNORECASE)
 
-    def __init__(self) -> None:
+    def __init__(self, restrict: Optional[bool] = True) -> None:
         self._sections = dict()
+        self.restrict = restrict
 
     @property
     def sections(self) -> list:
         return list(self._sections)
 
-    def set(self, section: str, option: str, value: Optional[str] = '') -> None:
+    def set(self, section: str, option: str, value: Optional[str] = None) -> None:
         if section not in self:
             raise NoSectionError(section)
         self[section].add_option(option, value)
 
     def get(self, section: str, option: Optional[str] = None, *,
             only_value: Optional[bool] = True) -> Union[Section, Option, None, str]:
-        # TODO fix behaviour to allow getting option based on 'option' and not 'name'
-        # If there's multiple option with the same key, return all of them
-
         if section not in self:
             raise NoSectionError(section)
         elif option is not None and option not in self[section]:
@@ -346,12 +341,6 @@ class ModConfigParser(MutableMapping):  # TODO allow same option name with speci
             file.close()
 
     def read_file(self, fp: TextIO) -> None:
-        # TODO change read behaviour to allow these situations
-        #
-        # option with same key but with different value
-        # overridetexture = p0-t0
-        # overridetexture = p1-t1
-
         config_data = [line.replace('\n', '') for line in fp.readlines()]
         cursect = None  # None or Section
         lastsect = None  # None or Section
@@ -395,6 +384,9 @@ class ModConfigParser(MutableMapping):  # TODO allow same option name with speci
 
                 if not cursect.has_option(option_match.group('option')):
                     cursect.add_option(**option_match.groupdict())
+                elif not self.restrict and cursect.get(option_match.group('option')) != option_match.group('value'):
+                    name = f"{option_match.group('option')}-{uuid.uuid4()}"
+                    cursect.add_option(name=name, **option_match.groupdict())
             elif section_match is None is option_match:  # Unparsable line
                 if cursect is None is lastsect:
                     raise NoSectionHeaderError(option_match.group('option'))
