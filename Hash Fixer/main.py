@@ -57,7 +57,7 @@ RESECTION = regex.compile(r'''
 
 class HashFixer(object):
     config = parser.ModConfigParser()
-    mod_config = parser.ModConfigParser()
+    mod_config = parser.ModConfigParser(restrict=False)
 
     def __init__(self, mode: Optional[str] = 'fix') -> None:
         self.mod_folder = None
