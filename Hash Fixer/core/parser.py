@@ -347,7 +347,7 @@ class ModConfigParser(MutableMapping):
         lastempty = False  # True if the previous item is space
 
         for line in config_data:
-            if not line:
+            if not line.strip():
                 lastempty = True
                 continue
             if line.strip()[0] in Comment.PREFIX:
