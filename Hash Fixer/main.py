@@ -76,7 +76,7 @@ class HashFixer(object):
             open('common_hash.txt', 'w').close()
             return set()
 
-        with open('common_hash.txt', 'r') as file:
+        with open('common_hash.txt', 'r', encoding='utf-8') as file:
             common_hash = set(line.strip() for line in file.readlines())
             file.close()
         return common_hash
@@ -94,7 +94,7 @@ class HashFixer(object):
         self.config.add_comment('However this is only will skip the related config instead of parsing it', 'Settings')
         self.config.set('Settings', 'suppress_no_header_error', json.dumps(self.suppress_no_header_err))
 
-        with open('config.ini', 'w') as file:
+        with open('config.ini', 'w', encoding='utf-8') as file:
             self.config.write(file)
             file.close()
         if self.mod_folder is not None:
@@ -159,7 +159,7 @@ class HashFixer(object):
         hashes = set(hash_ for hash_ in hashes if hashes.count(hash_) > 1)
         old_hashes.update(hashes.difference(old_hashes))
 
-        with open('common_hash.txt', 'w') as file:
+        with open('common_hash.txt', 'w', encoding='utf-8') as file:
             file.write('\n'.join(old_hashes))
             file.close()
         return old_hashes
@@ -209,7 +209,7 @@ class HashFixer(object):
                     self.mod_config.remove_option(section, 'match_priority')
                     logger.info(f"Config {ini_name}: deleting 'match_priority' from section -> {section}")
 
-        with open(ini, 'w') as file:
+        with open(ini, 'w', encoding='utf-8') as file:
             self.mod_config.write(file)
             file.close()
 

@@ -336,7 +336,7 @@ class ModConfigParser(MutableMapping):
         del self[section][option]
 
     def read(self, filename: str) -> None:
-        with open(filename, 'r') as file:
+        with open(filename, 'r', encoding='utf-8') as file:
             self.read_file(file)
             file.close()
 
