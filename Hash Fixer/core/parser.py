@@ -280,7 +280,7 @@ class ModConfigParser(MutableMapping):
     def set(self, section: str, option: str, value: Optional[str] = None) -> None:
         if section not in self:
             raise NoSectionError(section)
-        self[section].add_option(option, value)
+        self[section].add_option(option=option, value=value)
 
     def get(self, section: str, option: Optional[str] = None, *,
             only_value: Optional[bool] = True) -> Union[Section, Option, None, str]:
