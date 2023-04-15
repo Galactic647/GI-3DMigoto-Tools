@@ -7,6 +7,7 @@ from typing import Optional, Union
 import logging
 import regex
 import glob
+import json
 import os
 
 colorama.init()
@@ -61,6 +62,7 @@ class HashFixer(object):
 
     def __init__(self, mode: Optional[str] = 'fix') -> None:
         self.mod_folder = None
+        self.suppress_no_header_err = False
         self.common_hash = None
 
         if mode.lower() not in ('fix', 'restore'):
@@ -84,7 +86,13 @@ class HashFixer(object):
         logger.info('Creating config.ini')
 
         self.config.add_section('Path')
-        self.config.set('Path', 'mod_folder', '')
+        self.config.add_section('Settings')
+        self.config.set('Path', 'mod_folder', self.mod_folder)
+        self.config.add_comment('On most cases this value should always be set to \'false\'', 'Settings')
+        self.config.add_comment('so mod config related errors will be noticed', 'Settings')
+        self.config.add_comment('except if it\'s intentionaly put outside of a header (eg. HideUID mod config)', 'Settings')
+        self.config.add_comment('However this is only will skip the related config instead of parsing it', 'Settings')
+        self.config.set('Settings', 'suppress_no_header_error', json.dumps(self.suppress_no_header_err))
 
         with open('config.ini', 'w') as file:
             self.config.write(file)
@@ -100,10 +108,16 @@ class HashFixer(object):
         try:
             self.config.read('config.ini')
             self.mod_folder = self.config.get('Path', 'mod_folder')
-        except parser.NoSectionError:
-            logger.error(f'Section missing from config.ini')
+            self.suppress_no_header_err = self.config.get('Settings', 'suppress_no_header_error')
+            self.suppress_no_header_err = json.loads(self.suppress_no_header_err)
+        except parser.NoSectionError as e:
+            logger.error(f'{e} from config.ini')
             logger.info(f'Recreating config.ini')
-
+            self.create_config()
+            return
+        except parser.NoOptionError as e:
+            logger.error(f'{e} from config.ini')
+            logger.info(f'Recreating config.ini')
             self.create_config()
             return
         logger.info('Config loaded')
@@ -122,8 +136,18 @@ class HashFixer(object):
         old_hashes = self.load_hash()
 
         for file in files:
-            self.mod_config.clear()
-            self.mod_config.read(file)
+            try:
+                self.mod_config.clear()
+                self.mod_config.read(file)
+            except parser.NoSectionHeaderError as e:
+                if self.suppress_no_header_err:
+                    logger.info(f'Skipping {file}')
+                else:
+                    logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {file}')
+                continue
+            except Exception as e:
+                logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {file}')
+                continue
 
             for section in self.mod_config.sections:
                 if RESECTION.match(section) is None:
@@ -143,8 +167,14 @@ class HashFixer(object):
 
         try:
             self.mod_config.read(ini)
+        except parser.NoSectionHeaderError as e:
+            if self.suppress_no_header_err:
+                logger.info(f'Skipping {ini}')
+            else:
+                logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {ini}')
+            return
         except Exception as e:
-            logger.error(f'Unexpected error {e}')
+            logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {ini}')
             logger.info(f'Skipping {ini}')
             return
 
@@ -185,16 +215,16 @@ class HashFixer(object):
             if self.mod_folder is None:
                 return
             logger.info('Starting...')
-            logger.info('Collecting hashes...')
-            self.common_hash = self.collect_hash()
             logger.info('Scanning...')
             ini_files = self.get_ini_files()
-            logger.info(f'Detected {len(ini_files)} ini file(s)')
-
             if ini_files is None:
                 return
+
+            logger.info('Collecting hashes...')
+            self.common_hash = self.collect_hash()
+            logger.info(f'Detected {len(ini_files)} ini file(s)')
         except Exception as e:
-            logger.error(f'Unexpected error {e}')
+            logger.error(f'{type(e).__name__} {e.args[0]}')
             return
 
         for ini in ini_files:
@@ -206,7 +236,7 @@ class HashFixer(object):
             try:
                 self.process(ini=ini)
             except Exception as e:
-                logger.error(f'Unexpected error {e}')
+                logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {ini}')
         logger.info('Done!')
 
 
