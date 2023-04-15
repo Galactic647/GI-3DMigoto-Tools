@@ -97,7 +97,10 @@ class HashFixer(object):
         with open('config.ini', 'w') as file:
             self.config.write(file)
             file.close()
-        logger.info('config.ini created, please set the path and relaunch the tool')
+        if self.mod_folder is not None:
+            logger.info('Resuming process')
+        else:
+            logger.info('config.ini created, please check the config and relaunch the tool')
 
     def load_config(self) -> None:
         if not os.path.exists('config.ini'):
