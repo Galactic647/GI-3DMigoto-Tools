@@ -280,7 +280,7 @@ class ModConfigParser(MutableMapping):
     def set(self, section: str, option: str, value: Optional[str] = None) -> None:
         if section not in self:
             raise NoSectionError(section)
-        self[section].add_option(option, value)
+        self[section].add_option(option=option, value=value)
 
     def get(self, section: str, option: Optional[str] = None, *,
             only_value: Optional[bool] = True) -> Union[Section, Option, None, str]:
@@ -336,7 +336,7 @@ class ModConfigParser(MutableMapping):
         del self[section][option]
 
     def read(self, filename: str) -> None:
-        with open(filename, 'r') as file:
+        with open(filename, 'r', encoding='utf-8') as file:
             self.read_file(file)
             file.close()
 
@@ -347,7 +347,7 @@ class ModConfigParser(MutableMapping):
         lastempty = False  # True if the previous item is space
 
         for line in config_data:
-            if not line:
+            if not line.strip():
                 lastempty = True
                 continue
             if line.strip()[0] in Comment.PREFIX:
