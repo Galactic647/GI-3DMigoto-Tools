@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Optional, TextIO, Iterator, Union, Any
 from collections.abc import MutableMapping
 import contextlib
@@ -47,6 +49,34 @@ class NoSectionHeaderError(Exception):
         self.message = f'Option {option!r} detected outside of header'
         self.option = option
         super(NoSectionHeaderError, self).__init__(self.message)
+
+    def __repr__(self) -> str:
+        return self.message
+
+    __str__ = __repr__
+
+
+class MultipleHiddenSectionError(Exception):
+    """Raised if trying to create multiple hidden section"""
+
+    def __init__(self, section: str) -> None:
+        self.message = f'Cannot create hidden section {section!r} because a hidden section already exists'
+        self.option = section
+        super(MultipleHiddenSectionError, self).__init__(self.message)
+
+    def __repr__(self) -> str:
+        return self.message
+
+    __str__ = __repr__
+
+
+class HiddenSectionNotAllowedError(Exception):
+    """Raised if trying to create a hidden section without setting the flags"""
+
+    def __init__(self, section: str) -> None:
+        self.message = f'Cannot create hidden section {section!r} because it\'s not allowed'
+        self.option = section
+        super(HiddenSectionNotAllowedError, self).__init__(self.message)
 
     def __repr__(self) -> str:
         return self.message
@@ -160,12 +190,16 @@ class Section(MutableMapping):
     will be added directly without parsing.
     """
 
-    def __init__(self, name: str) -> None:
+    DEFAULT_HIDDEN_NAME = 'HiddenProperties'
+
+
+    def __init__(self, name: str, parent: Optional[ModConfigParser] = None) -> None:
         self.name = name
         if 'command' in self.name.lower():
             self.skip_parse = True
         else:
             self.skip_parse = False
+        self.parent = parent
         self._options = dict()
 
     @property
@@ -225,9 +259,19 @@ class Section(MutableMapping):
         return len(self._options)
 
     def __repr__(self) -> str:
+        allow_no_header = False
+        if self.parent is not None:
+            allow_no_header = self.parent.allow_no_header
+        hidden_section = self.name == self.DEFAULT_HIDDEN_NAME
+        
         if self.skip_parse or not self._options:
+            if hidden_section and allow_no_header:
+                return str()
             return f'[{self.name}]'
         options = '\n'.join(map(str, self._options.values()))
+
+        if hidden_section and allow_no_header:
+            return options
         return f'[{self.name}]\n{options}'
 
     __str__ = __repr__
@@ -261,7 +305,7 @@ class ModConfigParser(MutableMapping):
         |
             endif               # - Start with endif
         )                       # Match line that
-        (?P<option>[^=]+?)    # - Anything that isn't =
+        (?P<option>[^=]+?)      # - Anything that isn't =
         \s*=\s*                 # - = with any number of whitespaces before and after
         (?P<value>[^;#=]+?)     # - Anything that isn't ;#=
         \s*                     # - Any number of whitespaces
@@ -269,9 +313,10 @@ class ModConfigParser(MutableMapping):
         $
     """, regex.VERBOSE | regex.IGNORECASE)
 
-    def __init__(self, restrict: Optional[bool] = True) -> None:
+    def __init__(self, restrict: Optional[bool] = True, allow_no_header: Optional[bool] = False) -> None:
         self._sections = dict()
         self.restrict = restrict
+        self.allow_no_header = allow_no_header
 
     @property
     def sections(self) -> list:
@@ -310,6 +355,16 @@ class ModConfigParser(MutableMapping):
             self.update({section.name: section})
         else:
             self.update({section: Section(section)})
+
+    def add_hidden_section(self, section: str):
+        if self.has_section(Section.DEFAULT_HIDDEN_NAME):
+            raise MultipleHiddenSectionError(section)
+        elif not self.allow_no_header:
+            raise HiddenSectionNotAllowedError(section)
+
+        if section != Section.DEFAULT_HIDDEN_NAME:
+            Section.DEFAULT_HIDDEN_NAME = section
+        self.update({section: Section(section, parent=self)})
 
     def has_section(self, section: str) -> bool:
         return section in self
@@ -375,7 +430,14 @@ class ModConfigParser(MutableMapping):
                     cursect = None
             elif option_match and section_match is None:
                 if cursect is None is lastsect:
-                    raise NoSectionHeaderError(option_match.group('option'))
+                    if not self.allow_no_header:
+                        raise NoSectionHeaderError(option_match.group('option'))
+                    
+                    if not self.has_section(Section.DEFAULT_HIDDEN_NAME):
+                        self.add_hidden_section(Section.DEFAULT_HIDDEN_NAME)
+                    section = self.get(Section.DEFAULT_HIDDEN_NAME, only_value=False)
+                    section.add_option(**option_match.groupdict())
+                    continue
                 elif cursect is None is not lastsect:  # Option of duplicated sections
                     continue
                 elif cursect.skip_parse:
@@ -389,7 +451,14 @@ class ModConfigParser(MutableMapping):
                     cursect.add_option(name=name, **option_match.groupdict())
             elif section_match is None is option_match:  # Unparsable line
                 if cursect is None is lastsect:
-                    raise NoSectionHeaderError(option_match.group('option'))
+                    if not self.allow_no_header:
+                        raise NoSectionHeaderError(line)
+                    
+                    if not self.has_section(Section.DEFAULT_HIDDEN_NAME):
+                        self.add_hidden_section(Section.DEFAULT_HIDDEN_NAME)
+                    section = self.get(Section.DEFAULT_HIDDEN_NAME, only_value=False)
+                    section.add_option(value=line)
+                    continue
                 elif cursect is None is not lastsect:
                     continue
                 cursect.add_option(value=line)
