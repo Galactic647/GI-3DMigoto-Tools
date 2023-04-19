@@ -424,14 +424,17 @@ class ModConfigParser(MutableMapping):
         else:
             self.update({section: Section(section)})
 
-    def add_hidden_section(self, section: str):
-        if self.has_section(Section.DEFAULT_HIDDEN_NAME):
-            raise MultipleHiddenSectionError(section)
+    def add_hidden_section(self, section: Optional[str] = Section.DEFAULT_HIDDEN_NAME):
+        default_name = Section.DEFAULT_HIDDEN_NAME
+
+        if self.has_section(default_name):
+            if self[default_name].parent is not None:
+                raise MultipleHiddenSectionError(section)
         elif not self.allow_no_header:
             raise HiddenSectionNotAllowedError(section)
 
-        if section != Section.DEFAULT_HIDDEN_NAME:
-            Section.DEFAULT_HIDDEN_NAME = section
+        if section != default_name:
+            default_name = section
         self.update({section: Section(section, parent=self)})
 
     def has_section(self, section: str) -> bool:
@@ -471,7 +474,7 @@ class ModConfigParser(MutableMapping):
 
         Config files may also include comments, these comment can be prefixed by '#' or ';' (Default).
         Comments can also be inline with an option
-        
+
         For example:
             enable = true ; Enable some option
 
