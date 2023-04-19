@@ -5,9 +5,15 @@ from collections.abc import MutableMapping
 import contextlib
 import regex
 import uuid
+import configparser
 
 
 def identifier_check(name: str, type_: str) -> bool:
+    """Check if a string is an indentifier
+    
+    Returns True if a string starts with a type and ends with a uuid4 ID
+    """
+
     pattern = r'{type_}-[\da-f]{{8}}(?:-[\da-f]{{4}}){{3}}-[\da-f]{{12}}'
     if regex.search(pattern.format(type_=type_.lower()), name):
         return True
@@ -102,10 +108,18 @@ class ParseError(Exception):
 
 
 class Comment(object):
+    """Stores string as a comment, can be prefixed by ; or #"""
+
     PREFIX = (';', '#')
 
     def __init__(self, comment: str, name: Optional[str] = None, lead_space: Optional[bool] = False,
                  end_space: Optional[bool] = False) -> None:
+        """Construct Comment class
+
+        If comment doesn't start with any of the prefixes, it will use ; by default
+        Comment can also have a newline before and after then comment
+        """
+
         if name is None:
             name = f'comment-{uuid.uuid4()}'
         self._name = name
@@ -134,9 +148,29 @@ class Comment(object):
 
 
 class Option(object):
-    """Stores key, value pairs of option, or just value if not parsable"""
+    """Stores key, value pairs of option, or just value if not parsable
+    
+    Options can also be commented or using inline comments
+    """
 
     def __init__(self, **kwargs) -> None:
+        """Construct Option class
+
+        Parameters
+        ----------
+        **kwargs
+            value: str, default None
+                The value of an option
+            option: str, default None
+                The name of the option
+            name: str, default None
+                The name of the option object
+
+                name is equal to option if provided, if not name will be randomly generated with uuid4 ID
+            comment: str, default None
+                Inline comments
+        """
+
         self._is_commented = False
         self.value = kwargs.get('value')
         self.option = kwargs.get('option')
@@ -194,6 +228,23 @@ class Section(MutableMapping):
 
 
     def __init__(self, name: str, parent: Optional[ModConfigParser] = None) -> None:
+        """Construct Section class
+
+        Parameters
+        ----------
+        name: str
+            Name of the section
+        parent: ModConfigParser, default None
+            Parent of the section, optional
+        
+        Raises
+        ------
+        NoOptionError
+            Raised if an option doesn't exists
+        KeyError
+            Raised when trying to get non-existent option
+        """
+
         self.name = name
         if 'command' in self.name.lower():
             self.skip_parse = True
@@ -283,14 +334,6 @@ class ModConfigParser(MutableMapping):
     This parser also works for normal parser but not as rigid as configparser module.
     The parser is able to parse and perserve comments and commands, commands is saved in raw form
     since it was unparseable (intended).
-    
-    Normal usage:
-    >>> config = ModConfigParser()
-    >>> config.read('config.ini')
-
-    To allow multiple option with the same name in a section
-    >>> config.ModConfigParser(restrict=False)
-    >>> config.read('config.ini')
     """
 
     RESECTION = regex.compile(r'^\[(?P<section>.+?)\]$')
@@ -314,6 +357,31 @@ class ModConfigParser(MutableMapping):
     """, regex.VERBOSE | regex.IGNORECASE)
 
     def __init__(self, restrict: Optional[bool] = True, allow_no_header: Optional[bool] = False) -> None:
+        """Construct Parser class
+
+        Parameters
+        ----------
+        restrict: bool, default True
+            Flag to enable using options with the same name in a section
+        allow_no_header: bool, default False
+            Flag to enable using options without a section header, there can be only 1 hidden section
+        
+        Raises
+        ------
+        NoSectionError
+            Raised if a section doesn't exists
+        NoOptionError
+            Raised if an option doesn't exists
+        MultipleHiddenSectionError
+            Raised if trying to create multiple hidden sections
+        HiddenSectionNotAllowedError
+            Raised if trying to create a hidden section with allow_no_header flag set to False
+        ParseError
+            Raised if unable to parse a line (Both regex has to match the same line)
+        KeyError
+            Raised if instance doesn't have the specified key
+        """
+
         self._sections = dict()
         self.restrict = restrict
         self.allow_no_header = allow_no_header
@@ -396,6 +464,56 @@ class ModConfigParser(MutableMapping):
             file.close()
 
     def read_file(self, fp: TextIO) -> None:
+        """Parse a configuration file
+
+        Each section in a config file will contain a header name inside a square brackets ('[]'),
+        in each of those sections it can contains key/value options, indicated by '=' delimiter.
+
+        Config files may also include comments, these comment can be prefixed by '#' or ';' (Default).
+        Comments can also be inline with an option
+        
+        For example:
+            enable = true ; Enable some option
+
+        GIMI Specific config files can contains options with the same key/name, if the restrict parameter
+        is set to False, the latter option will be used, if restrict is True, the first option will have the
+        original key/name and the options after that will have an additional ID as the parser use
+        name (by object) instead of name (by option) when parsing it.
+
+        For example:
+            opt = Arg
+                {
+                    Name: opt
+                    Option: opt
+                    Value: Arg
+                }
+            opt = Arg2
+                {
+                    Name: opt-ID
+                    Option: opt
+                    Value: Arg2
+                }
+
+        GIMI also have several options that does not have a section header, if allow_no_header flag is set
+        to False, this will raise 'HiddenSectionNotAllowedError', if set to True, these options will be
+        added to a hidden section (default name: HiddenProperties) where the name of the section will
+        not get written when writing into a file.
+
+        Parameters
+        ----------
+        fp: TextIO
+            File object returned by open()
+        
+        Raises
+        ------
+        NoSectionError
+            Raised if a section doesn't exists
+        NoOptionError
+            Raised if an option doesn't exists
+        ParseError
+            Raised if unable to parse a line (Both regex has to match the same line)
+        """
+
         config_data = [line.replace('\n', '') for line in fp.readlines()]
         cursect = None  # None or Section
         lastsect = None  # None or Section
