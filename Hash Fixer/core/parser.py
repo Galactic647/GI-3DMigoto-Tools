@@ -5,7 +5,6 @@ from collections.abc import MutableMapping
 import contextlib
 import regex
 import uuid
-import configparser
 
 
 def identifier_check(name: str, type_: str) -> bool:
@@ -118,6 +117,17 @@ class Comment(object):
 
         If comment doesn't start with any of the prefixes, it will use ; by default
         Comment can also have a newline before and after then comment
+
+        Parameters
+        ----------
+        comment: str
+            The comment
+        name: str, default None
+            Name of the comment object
+        lead_space: bool, default False
+            Flag for using newline before comment
+        end_space: bool, default False
+            Flag for using newline after comment
         """
 
         if name is None:
@@ -155,6 +165,12 @@ class Option(object):
 
     def __init__(self, **kwargs) -> None:
         """Construct Option class
+
+        For parsable line or normal option with key/value pairs will have each argument
+        filled, except the comment (optional).
+
+        For unparsable lines like commands or other things, the only argument needed is
+        value.
 
         Parameters
         ----------
@@ -273,6 +289,9 @@ class Section(MutableMapping):
     def add_comment(self, comment: str, lead_space: Optional[bool] = False, end_space: Optional[bool] = False) -> None:
         comment = Comment(comment, lead_space=lead_space, end_space=end_space)
         self.update({comment.name: comment})
+
+    def is_empty(self) -> bool:
+        return not bool(self)
 
     def has_option(self, option: str) -> bool:
         return option in self
@@ -448,6 +467,12 @@ class ModConfigParser(MutableMapping):
         if isinstance(check_section, Comment):
             return option == check_section.name
         return option in check_section
+
+    def remove_empty_sections(self) -> None:
+        for section in self.sections:
+            if not self[section].is_empty():
+                continue
+            self.remove_section(section)
 
     def remove_section(self, section: str) -> None:
         if section not in self:
