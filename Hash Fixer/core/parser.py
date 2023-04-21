@@ -117,17 +117,6 @@ class Comment(object):
 
         If comment doesn't start with any of the prefixes, it will use ; by default
         Comment can also have a newline before and after then comment
-
-        Parameters
-        ----------
-        comment: str
-            The comment
-        name: str, default None
-            Name of the comment object
-        lead_space: bool, default False
-            Flag for using newline before comment
-        end_space: bool, default False
-            Flag for using newline after comment
         """
 
         if name is None:
@@ -165,12 +154,6 @@ class Option(object):
 
     def __init__(self, **kwargs) -> None:
         """Construct Option class
-
-        For parsable line or normal option with key/value pairs will have each argument
-        filled, except the comment (optional).
-
-        For unparsable lines like commands or other things, the only argument needed is
-        value.
 
         Parameters
         ----------
@@ -241,6 +224,28 @@ class Section(MutableMapping):
     """
 
     DEFAULT_HIDDEN_NAME = 'HiddenProperties'
+    HEADER_CHECK = regex.compile(r'''
+        ^
+        (?P<header>
+            TextureOverride
+        |
+            ShaderOverride
+        |
+            Resource
+        |
+            Constants
+        |
+            Present
+        |
+            CommandList
+        |
+            CustomShader
+        )
+        (?P<name>
+            .+
+        )?
+        $
+    ''', regex.VERBOSE | regex.IGNORECASE)
 
 
     def __init__(self, name: str, parent: Optional[ModConfigParser] = None) -> None:
@@ -279,6 +284,17 @@ class Section(MutableMapping):
         if only_value:
             return self[option].value
         return self[option]
+
+    def to_dict(self) -> dict:
+        data = {'section': self.name}
+        match = self.HEADER_CHECK.search(self.name)
+        data.update(match.groupdict())
+
+        for name, option in self.items():
+            if identifier_check(name, 'comment'):
+                continue
+            data[option.option] = option.value
+        return data
 
     def add_option(self, name: Optional[str] = None, option: Optional[str] = None, value: Optional[str] = None, comment: Optional[str] = None) -> None:
         if option is None is value:
@@ -426,6 +442,14 @@ class ModConfigParser(MutableMapping):
                 return str(self[section])
             return self[section]
         return self[section].get(option, only_value=only_value)
+
+    def get_data(self) -> list:
+        data = []
+        for name, section in self.items():
+            if identifier_check(name, 'comment'):
+                continue
+            data.append(section.to_dict())
+        return data
 
     def add_comment(self, comment: str, section: Optional[str] = None, lead_space: Optional[bool] = False,
                     end_space: Optional[bool] = False) -> None:
