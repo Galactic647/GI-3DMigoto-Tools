@@ -248,7 +248,7 @@ class Section(MutableMapping):
     ''', regex.VERBOSE | regex.IGNORECASE)
 
 
-    def __init__(self, name: str, parent: Optional[ModConfigParser] = None) -> None:
+    def __init__(self, name: str, parent: Optional[GIMIConfigParser] = None) -> None:
         """Construct Section class
 
         Parameters
@@ -363,7 +363,7 @@ class Section(MutableMapping):
     __str__ = __repr__
 
 
-class ModConfigParser(MutableMapping):
+class GIMIConfigParser(MutableMapping):
     """Custom parser for GIMI mods config files
     
     This parser also works for normal parser but not as rigid as configparser module.
