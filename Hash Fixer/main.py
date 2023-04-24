@@ -1,13 +1,12 @@
-from core import parser
+from core import configparser
 
 from colorama import Fore, Style
 import colorama
 
-from typing import Optional, Union
+from typing import Optional
 import logging
 import regex
 import glob
-import json
 import os
 
 colorama.init()
@@ -57,12 +56,11 @@ RESECTION = regex.compile(r'''
 
 
 class HashFixer(object):
-    config = parser.ModConfigParser()
-    mod_config = parser.ModConfigParser(restrict=False)
+    config = configparser.GIMIConfigParser()
+    mod_config = configparser.GIMIConfigParser(restrict=False, allow_no_header=True)
 
     def __init__(self, mode: Optional[str] = 'fix') -> None:
         self.mod_folder = None
-        self.suppress_no_header_err = False
         self.common_hash = None
 
         if mode.lower() not in ('fix', 'restore'):
@@ -86,21 +84,12 @@ class HashFixer(object):
         logger.info('Creating config.ini')
 
         self.config.add_section('Path')
-        self.config.add_section('Settings')
         self.config.set('Path', 'mod_folder', self.mod_folder)
-        self.config.add_comment('On most cases this value should always be set to \'false\'', 'Settings')
-        self.config.add_comment('so mod config related errors will be noticed', 'Settings')
-        self.config.add_comment('except if it\'s intentionaly put outside of a header (eg. HideUID mod config)', 'Settings')
-        self.config.add_comment('However this is only will skip the related config instead of parsing it', 'Settings')
-        self.config.set('Settings', 'suppress_no_header_error', json.dumps(self.suppress_no_header_err))
 
         with open('config.ini', 'w', encoding='utf-8') as file:
             self.config.write(file)
             file.close()
-        if self.mod_folder is not None:
-            logger.info('Resuming process')
-        else:
-            logger.info('config.ini created, please check the config and relaunch the tool')
+        logger.info('config.ini created, please check the config and relaunch the tool')
 
     def load_config(self) -> None:
         if not os.path.exists('config.ini'):
@@ -111,14 +100,12 @@ class HashFixer(object):
         try:
             self.config.read('config.ini')
             self.mod_folder = self.config.get('Path', 'mod_folder')
-            self.suppress_no_header_err = self.config.get('Settings', 'suppress_no_header_error')
-            self.suppress_no_header_err = json.loads(self.suppress_no_header_err)
-        except parser.NoSectionError as e:
+        except configparser.NoSectionError as e:
             logger.error(f'{e} from config.ini')
             logger.info(f'Recreating config.ini')
             self.create_config()
             return
-        except parser.NoOptionError as e:
+        except configparser.NoOptionError as e:
             logger.error(f'{e} from config.ini')
             logger.info(f'Recreating config.ini')
             self.create_config()
@@ -142,12 +129,6 @@ class HashFixer(object):
             try:
                 self.mod_config.clear()
                 self.mod_config.read(file)
-            except parser.NoSectionHeaderError as e:
-                if self.suppress_no_header_err:
-                    logger.info(f'Skipping {file}')
-                else:
-                    logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {file}')
-                continue
             except Exception as e:
                 logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {file}')
                 continue
@@ -170,19 +151,13 @@ class HashFixer(object):
 
         try:
             self.mod_config.read(ini)
-        except parser.NoSectionHeaderError as e:
-            if self.suppress_no_header_err:
-                logger.info(f'Skipping {ini}')
-            else:
-                logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {ini}')
-            return
         except Exception as e:
             logger.error(f'{type(e).__name__} {e.args[0]} while processing file -> {ini}')
             logger.info(f'Skipping {ini}')
             return
 
         for section in self.mod_config.sections:
-            if not self.mod_config.has_option(section, 'hash') or parser.identifier_check(section, 'comment'):
+            if not self.mod_config.has_option(section, 'hash') or configparser.identifier_check(section, 'comment'):
                 continue
 
             hash_ = self.mod_config.get(section, 'hash')
