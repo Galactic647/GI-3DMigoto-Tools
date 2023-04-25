@@ -89,6 +89,20 @@ class HiddenSectionNotAllowedError(Exception):
     __str__ = __repr__
 
 
+class NameDuplicateError(Exception):
+    """Raised if two different objects has the same name"""
+
+    def __init__(self, name: str) -> None:
+        self.message = f'Duplicate name of {name!r}'
+        self.option = name
+        super(NameDuplicateError, self).__init__(self.message)
+
+    def __repr__(self) -> str:
+        return self.message
+
+    __str__ = __repr__
+
+
 class ParseError(Exception):
     """Raised when unable to parse a line
     
@@ -117,6 +131,17 @@ class Comment(object):
 
         If comment doesn't start with any of the prefixes, it will use ; by default
         Comment can also have a newline before and after then comment
+        
+        Parameters
+        ----------
+        comment: str
+            The comment
+        name: str, default None
+            Name of the comment object
+        lead_space: bool, default False 
+            Flag for adding newline before comment
+        end_space: bool, default False 
+            Flag for adding newline after comment
         """
 
         if name is None:
@@ -278,12 +303,12 @@ class Section(MutableMapping):
     def options(self) -> list:
         return list(self._options)
 
-    def get(self, option: str, *, only_value: Optional[bool] = True) -> Union[Option, Any]:
+    def get(self, option: str, *, as_object: Optional[bool] = False) -> Union[Option, str]:
         if option not in self:
             raise NoOptionError(option)
-        if only_value:
-            return self[option].value
-        return self[option]
+        if as_object:
+            return self[option]
+        return self[option].value
 
     def to_dict(self) -> dict:
         data = {'section': self.name}
@@ -363,7 +388,178 @@ class Section(MutableMapping):
     __str__ = __repr__
 
 
-class GIMIConfigParser(MutableMapping):
+class ParserBase(MutableMapping):
+    """Base class for Group and Parser class
+    
+    Contains common attributes and methods between two classes
+    """
+
+    def __init__(self) -> None:
+        self._sections = dict()
+
+    @property
+    def sections(self) -> list:
+        return list(self._sections)
+
+    def set(self, section: str, option: str, value: Optional[str] = None) -> None:
+        if section not in self:
+            raise NoSectionError(section)
+        self[section].add_option(option=option, value=value)
+    
+    def get(self, section: str, option: str, *, as_object: Optional[bool] = False) -> Union[Option, str]:
+        if section not in self:
+            raise NoSectionError(section)
+        elif option not in self[section]:
+            raise NoOptionError(option)
+        return self[section].get(option, as_object=as_object)
+
+    def get_section(self, section: str, *, as_object: Optional[bool] = False) -> Union[Section, str]:
+        if section not in self:
+            raise NoSectionError(section)
+        if as_object:
+            return self[section]
+        return str(self[section])
+
+    def get_data(self) -> list:
+        """Returns config data as a dictionary"""
+
+        data = []
+        for _, section in self.items():
+            if isinstance(section, Comment):
+                continue
+            data.append(section.to_dict())
+        return data
+
+    def add_comment(self, comment: str, section: Optional[str] = None, lead_space: Optional[bool] = False,
+                    end_space: Optional[bool] = False) -> None:
+        if section is None:
+            comment = Comment(comment, lead_space=lead_space, end_space=end_space)
+            self.update({comment.name: comment})
+        elif section not in self:
+            raise NoSectionError(section)
+        else:
+            self[section].add_comment(comment, lead_space=lead_space, end_space=end_space)
+
+    def add_section(self, section: Union[Section, str]) -> None:
+        if isinstance(section, Section):
+            self.update({section.name: section})
+        else:
+            self.update({section: Section(section)})
+
+    def has_section(self, section: str) -> bool:
+        return section in self
+
+    def has_option(self, section: str, option: str) -> bool:
+        if section not in self:
+            raise NoSectionError(section)
+        
+        check_section = self[section]
+        if isinstance(check_section, Comment):
+            return option == check_section.name
+        return option in check_section
+
+    def remove_empty_sections(self) -> None:
+        for section in self.sections:
+            if not self[section].is_empty():
+                continue
+            self.remove_section(section)
+
+    def remove_section(self, section: str) -> None:
+        if section not in self:
+            raise NoSectionError(section)
+        del self[section]
+
+    def remove_option(self, section: str, option: str) -> None:
+        if section not in self:
+            raise NoSectionError(section)
+        elif option not in self[section]:
+            raise NoOptionError(option)
+        del self[section][option]
+
+    @contextlib.contextmanager
+    def _parse_check(self, section: Section, include_skip: Optional[bool] = False) -> None:
+        skip_parse = section.skip_parse
+        if include_skip:
+            section.skip_parse = False
+        yield
+        section.skip_parse = skip_parse
+
+    def dumps(self, include_skip: Optional[bool] = False) -> str:
+        items = []
+        comments  = []
+
+        for _, section in self.items():
+            if isinstance(section, Comment):
+                comments.append(section)
+                continue
+            if comments:
+                items.append('\n'.join(map(str, comments)))
+                comments.clear()
+
+            with self._parse_check(section, include_skip):
+                items.append(str(section))
+        if comments:
+            items.append('\n'.join(map(str, comments)))
+        return '\n\n'.join(items).strip()
+
+    def __getitem__(self, key):
+        if key not in self._sections:
+            raise KeyError(key)
+        return self._sections[key]
+    
+    def __setitem__(self, key, value) -> None:
+        if key in self._sections and self._sections[key] == value:
+            return
+        self._sections[key] = value
+    
+    def __delitem__(self, key) -> None:
+        if key not in self._sections:
+            raise KeyError(key)
+        del self._sections[key]
+    
+    def __len__(self) -> int:
+        return len(self.sections)
+    
+    def __iter__(self) -> Iterator:
+        return iter(self.sections)
+
+
+class Group(ParserBase):
+    """Group object that contains objects"""
+
+    def __init__(self, header: str, no_header: Optional[bool] = False) -> None:
+        """Construct Group class
+
+        Parameters
+        ----------
+        header: str
+            The header of a group (this will be a comment on the config)
+        no_header: bool, default False
+            Flag for not parsing header when writing to a file
+        """
+
+        super().__init__()
+        self.header = header
+        self.no_header = no_header
+
+        header = Comment(self.header)
+        self.name = header.name
+        self._sections[header.name] = header
+
+    @property
+    def sections(self) -> list:
+        return list(self._sections)
+
+    def __repr__(self) -> str:
+        section = self._sections.copy()
+        if self.no_header:
+            del section[self.name]
+        return self.dumps(True)
+
+    __str__ = __repr__
+
+
+class GIMIConfigParser(ParserBase):
     """Custom parser for GIMI mods config files
     
     This parser also works for normal parser but not as rigid as configparser module.
@@ -417,55 +613,34 @@ class GIMIConfigParser(MutableMapping):
             Raised if instance doesn't have the specified key
         """
 
-        self._sections = dict()
+        super().__init__()
+        self._groups = list()
         self.restrict = restrict
         self.allow_no_header = allow_no_header
 
     @property
     def sections(self) -> list:
-        return list(self._sections)
+        sects = []
+        for section in self._sections:
+            if section in self._groups:
+                sects.extend(self._sections[section].sections)
+            else:
+                sects.append(section)
+        return sects
 
-    def set(self, section: str, option: str, value: Optional[str] = None) -> None:
-        if section not in self:
-            raise NoSectionError(section)
-        self[section].add_option(option=option, value=value)
-
-    def get(self, section: str, option: Optional[str] = None, *,
-            only_value: Optional[bool] = True) -> Union[Section, Option, None, str]:
-        if section not in self:
-            raise NoSectionError(section)
-        elif option is not None and option not in self[section]:
-            raise NoOptionError(option)
-
-        if option is None:
-            if only_value:
-                return str(self[section])
-            return self[section]
-        return self[section].get(option, only_value=only_value)
+    @property
+    def groups(self) -> list:
+        return list(self._groups)
 
     def get_data(self) -> list:
         data = []
         for name, section in self.items():
             if identifier_check(name, 'comment'):
                 continue
+            elif isinstance(section, Group):
+                data.extend(section.get_data())
             data.append(section.to_dict())
         return data
-
-    def add_comment(self, comment: str, section: Optional[str] = None, lead_space: Optional[bool] = False,
-                    end_space: Optional[bool] = False) -> None:
-        if section is None:
-            comment = Comment(comment, lead_space=lead_space, end_space=end_space)
-            self.update({comment.name: comment})
-        elif section not in self:
-            raise NoSectionError(section)
-        else:
-            self[section].add_comment(comment, lead_space=lead_space, end_space=end_space)
-
-    def add_section(self, section: Union[Section, str]) -> None:
-        if isinstance(section, Section):
-            self.update({section.name: section})
-        else:
-            self.update({section: Section(section)})
 
     def add_hidden_section(self, section: Optional[str] = Section.DEFAULT_HIDDEN_NAME):
         default_name = Section.DEFAULT_HIDDEN_NAME
@@ -480,35 +655,24 @@ class GIMIConfigParser(MutableMapping):
             default_name = section
         self.update({section: Section(section, parent=self)})
 
-    def has_section(self, section: str) -> bool:
-        return section in self
+    def add_group(self, group: str, no_header: Optional[bool] = False) -> Group:
+        if group in self and not isinstance(group, Group):
+            raise NameDuplicateError(group)
+        if group in self and isinstance(group, Group):
+            return self[group]
 
-    def has_option(self, section: str, option: str) -> bool:
-        if section not in self:
-            raise NoSectionError(section)
-        
-        check_section = self[section]
-        if isinstance(check_section, Comment):
-            return option == check_section.name
-        return option in check_section
+        group = Group(group, no_header=no_header)
+        self.update({group.name: group})
+        return group
 
     def remove_empty_sections(self) -> None:
         for section in self.sections:
-            if not self[section].is_empty():
+            if isinstance(self[section], Group):
+                self[section].remove_empty_sections()
+                continue
+            elif not self[section].is_empty():
                 continue
             self.remove_section(section)
-
-    def remove_section(self, section: str) -> None:
-        if section not in self:
-            raise NoSectionError(section)
-        del self[section]
-
-    def remove_option(self, section: str, option: str) -> None:
-        if section not in self:
-            raise NoSectionError(section)
-        elif option not in self[section]:
-            raise NoOptionError(option)
-        del self[section][option]
 
     def read(self, filename: str) -> None:
         with open(filename, 'r', encoding='utf-8') as file:
@@ -637,19 +801,16 @@ class GIMIConfigParser(MutableMapping):
     def write(self, fp: TextIO) -> None:
         fp.write(self.dumps(include_skip=True))
 
-    @contextlib.contextmanager
-    def _parse_check(self, section: Section, include_skip: Optional[bool] = False) -> None:
-        skip_parse = section.skip_parse
-        if include_skip:
-            section.skip_parse = False
-        yield
-        section.skip_parse = skip_parse
+    def write_file(self, filename: str) -> None:
+        with open(filename, 'w', encoding='utf-8') as file:
+            self.write(file)
+            file.close()
 
     def dumps(self, include_skip: Optional[bool] = False) -> str:
         items = []
         comments  = []
 
-        for name, section in self.items():
+        for name, section in self._sections.items():
             if identifier_check(name, 'comment'):
                 comments.append(section)
                 continue
@@ -657,29 +818,46 @@ class GIMIConfigParser(MutableMapping):
                 items.append('\n'.join(map(str, comments)))
                 comments.clear()
 
+            if isinstance(section, Group):
+                items.append(str(section))
+                continue
+
             with self._parse_check(section, include_skip):
                 items.append(str(section))
-        return '\n\n'.join(items)
+        if comments:
+            items.append('\n'.join(map(str, comments)))
+        return '\n\n'.join(items).strip()
 
-    def __getitem__(self, key: str) -> Section:
+    def __getitem__(self, key: str) -> Union[Group, Section]:
+        if key in self._groups:
+            return self._sections[key]
+
+        for group in self._groups:
+            if key not in self._sections[group]:
+                continue
+            return self._sections[group][key]
         if key not in self._sections:
             raise KeyError(key)
         return self._sections[key]
 
-    def __setitem__(self, key: str, value: Union[Section, Comment, str]) -> None:
-        if not isinstance(value, (Section, Comment, str)):
+    def __setitem__(self, key: str, value: Union[Group, Section, Comment, str]) -> None:
+        if not isinstance(value, (Group, Section, Comment, str)):
             return NotImplemented
         elif isinstance(value, (str, Comment)) and not identifier_check(key, 'comment'):
             return
         self._sections[key] = value
+        if isinstance(value, Group):
+            self._groups.append(key)
 
     def __delitem__(self, key: str) -> None:
+        if key in self._groups:
+            del self._sections[key]
+            del self._groups[key]
+        for group in self._groups:
+            if key not in self._sections[group]:
+                continue
+            del self._sections[group][key]
+            return
         if key not in self._sections:
             raise KeyError(key)
         del self._sections[key]
-
-    def __iter__(self) -> Iterator:
-        return iter(self._sections)
-
-    def __len__(self) -> int:
-        return len(self._sections)
