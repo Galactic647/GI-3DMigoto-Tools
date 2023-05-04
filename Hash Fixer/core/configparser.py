@@ -89,6 +89,20 @@ class HiddenSectionNotAllowedError(Exception):
     __str__ = __repr__
 
 
+class SectionAlreadyExistsError(Exception):
+    """Raised if trying to create a section that's already exists"""
+
+    def __init__(self, section: str) -> None:
+        self.message = f'Cannot create section {section!r} because it already exists'
+        self.option = section
+        super(SectionAlreadyExistsError, self).__init__(self.message)
+
+    def __repr__(self) -> str:
+        return self.message
+
+    __str__ = __repr__
+
+
 class NameDuplicateError(Exception):
     """Raised if two different objects has the same name"""
 
@@ -315,8 +329,8 @@ class Section(MutableMapping):
         match = self.HEADER_CHECK.search(self.name)
         data.update(match.groupdict())
 
-        for name, option in self.items():
-            if identifier_check(name, 'comment'):
+        for _, option in self.items():
+            if isinstance(option, Comment):
                 continue
             data[option.option] = option.value
         return data
@@ -434,17 +448,11 @@ class ParserBase(MutableMapping):
                     end_space: Optional[bool] = False) -> None:
         if section is None:
             comment = Comment(comment, lead_space=lead_space, end_space=end_space)
-            self.update({comment.name: comment})
+            self[comment.name] = comment
         elif section not in self:
             raise NoSectionError(section)
         else:
             self[section].add_comment(comment, lead_space=lead_space, end_space=end_space)
-
-    def add_section(self, section: Union[Section, str]) -> None:
-        if isinstance(section, Section):
-            self.update({section.name: section})
-        else:
-            self.update({section: Section(section)})
 
     def has_section(self, section: str) -> bool:
         return section in self
@@ -525,20 +533,26 @@ class ParserBase(MutableMapping):
 
 
 class Group(ParserBase):
-    """Group object that contains objects"""
+    """Group object that contains objects
+    
+    Make creating config files easier without worrying about order
+    """
 
-    def __init__(self, header: str, no_header: Optional[bool] = False) -> None:
+    def __init__(self, header: str, parent: GIMIConfigParser, no_header: Optional[bool] = False) -> None:
         """Construct Group class
 
         Parameters
         ----------
         header: str
             The header of a group (this will be a comment on the config)
+        parent: GIMIConfigParser
+            The parent of the group
         no_header: bool, default False
             Flag for not parsing header when writing to a file
         """
 
         super().__init__()
+        self.parent = parent
         self.header = header
         self.no_header = no_header
 
@@ -546,9 +560,11 @@ class Group(ParserBase):
         self.name = header.name
         self._sections[header.name] = header
 
-    @property
-    def sections(self) -> list:
-        return list(self._sections)
+    def add_section(self, section: str) -> None:
+        if section in self.parent:
+            raise SectionAlreadyExistsError(section)
+
+        self[section] = Section(section)
 
     def __repr__(self) -> str:
         section = self._sections.copy()
@@ -630,30 +646,41 @@ class GIMIConfigParser(ParserBase):
 
     @property
     def groups(self) -> list:
-        return list(self._groups)
+        return self._groups
 
     def get_data(self) -> list:
         data = []
-        for name, section in self.items():
-            if identifier_check(name, 'comment'):
+        for _, section in self.items():
+            if isinstance(section, Comment):
                 continue
             elif isinstance(section, Group):
                 data.extend(section.get_data())
+                continue
             data.append(section.to_dict())
         return data
+
+    def add_section(self, section: str) -> None:
+        if section in self:
+            raise SectionAlreadyExistsError(section)
+
+        self[section] = Section(section)
 
     def add_hidden_section(self, section: Optional[str] = Section.DEFAULT_HIDDEN_NAME):
         default_name = Section.DEFAULT_HIDDEN_NAME
 
-        if self.has_section(default_name):
+        if default_name in self:
             if self[default_name].parent is not None:
                 raise MultipleHiddenSectionError(section)
         elif not self.allow_no_header:
             raise HiddenSectionNotAllowedError(section)
 
         if section != default_name:
-            default_name = section
-        self.update({section: Section(section, parent=self)})
+            Section.DEFAULT_HIDDEN_NAME = section
+        
+        # This is quite expensive but it will always runs only once
+        new_order = {section: Section(section, parent=self)}
+        new_order.update(self._sections)
+        self._sections = new_order
 
     def add_group(self, group: str, no_header: Optional[bool] = False) -> Group:
         if group in self and not isinstance(group, Group):
@@ -661,7 +688,7 @@ class GIMIConfigParser(ParserBase):
         if group in self and isinstance(group, Group):
             return self[group]
 
-        group = Group(group, no_header=no_header)
+        group = Group(group, parent=self, no_header=no_header)
         self.update({group.name: group})
         return group
 
@@ -810,8 +837,8 @@ class GIMIConfigParser(ParserBase):
         items = []
         comments  = []
 
-        for name, section in self._sections.items():
-            if identifier_check(name, 'comment'):
+        for _, section in self._sections.items():
+            if isinstance(section, Comment):
                 comments.append(section)
                 continue
             if comments:
