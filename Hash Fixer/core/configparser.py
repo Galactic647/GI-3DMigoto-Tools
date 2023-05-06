@@ -666,6 +666,25 @@ class GIMIConfigParser(ParserBase):
         self[section] = Section(section)
 
     def add_hidden_section(self, section: Optional[str] = Section.DEFAULT_HIDDEN_NAME):
+        """Add hidden section to config
+        
+        When creating a hidden section, make sure to add the hidden section before adding normal
+        sections, if not the options of the hidden sections will be merged with the previous section
+        when writing to a file
+
+        Parameters
+        ----------
+        section: str, default Section.DEFAULT_HIDDEN_NAME ('HiddenProperties')
+            The name of the hidden section
+        
+        Raises
+        ------
+        MultipleHiddenSectionError
+            Raised if trying to create multiple hidden sections
+        HiddenSectionNotAllowedError
+            Raised if trying to create a hidden section with allow_no_header flag set to False
+        """
+
         default_name = Section.DEFAULT_HIDDEN_NAME
 
         if default_name in self:
@@ -676,11 +695,7 @@ class GIMIConfigParser(ParserBase):
 
         if section != default_name:
             Section.DEFAULT_HIDDEN_NAME = section
-        
-        # This is quite expensive but it will always runs only once
-        new_order = {section: Section(section, parent=self)}
-        new_order.update(self._sections)
-        self._sections = new_order
+        self.update({section: Section(section, parent=self)})
 
     def add_group(self, group: str, no_header: Optional[bool] = False) -> Group:
         if group in self and not isinstance(group, Group):
@@ -781,12 +796,12 @@ class GIMIConfigParser(ParserBase):
             if section_match and option_match:
                 raise ParseError(line)
             elif section_match and option_match is None:
-                section = Section(section_match.group('section'))
+                section = section_match.group('section')
 
-                if not self.has_section(section.name):
+                if not self.has_section(section):
                     lastsect = cursect
                     self.add_section(section)
-                    cursect = self[section.name]
+                    cursect = self[section]
                 else:
                     cursect = None
             elif option_match and section_match is None:
@@ -796,8 +811,9 @@ class GIMIConfigParser(ParserBase):
                     
                     if not self.has_section(Section.DEFAULT_HIDDEN_NAME):
                         self.add_hidden_section(Section.DEFAULT_HIDDEN_NAME)
-                    section = self.get(Section.DEFAULT_HIDDEN_NAME, only_value=False)
+                    section = self.get_section(Section.DEFAULT_HIDDEN_NAME, as_object=True)
                     section.add_option(**option_match.groupdict())
+                    cursect = section
                     continue
                 elif cursect is None is not lastsect:  # Option of duplicated sections
                     continue
@@ -817,7 +833,7 @@ class GIMIConfigParser(ParserBase):
                     
                     if not self.has_section(Section.DEFAULT_HIDDEN_NAME):
                         self.add_hidden_section(Section.DEFAULT_HIDDEN_NAME)
-                    section = self.get(Section.DEFAULT_HIDDEN_NAME, only_value=False)
+                    section = self.get_section(Section.DEFAULT_HIDDEN_NAME, as_object=True)
                     section.add_option(value=line)
                     continue
                 elif cursect is None is not lastsect:
